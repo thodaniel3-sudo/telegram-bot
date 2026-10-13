@@ -1,0 +1,40 @@
+# ── Secrets ─────────────────────────────────────
+# Never commit your real credentials.
+.env
+token_backup.txt
+
+# ── Python bytecode / caches ────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ── Virtual environments ────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Local database and logs ─────────────────────
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+logs/*.log
+
+# ── ML model artifacts ──────────────────────────
+models/*.joblib
+models/*.pkl
+models/*.h5
+
+# ── Editor / OS junk ────────────────────────────
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── Test / coverage output ──────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
