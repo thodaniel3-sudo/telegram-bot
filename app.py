@@ -3,10 +3,7 @@ app.py
 ------
 Render deployment entry point.
 
-Runs the Telegram bot in webhook mode (required for Render free tier)
-and provides a /health endpoint for Render's health checks.
-
-Local development uses `python main.py` (polling mode) instead.
+Runs the Telegram bot in webhook mode.
 """
 
 from __future__ import annotations
@@ -68,22 +65,27 @@ async def lifespan(app: FastAPI):
     await bot_app.bot.set_webhook(
         url=webhook_url,
         allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=False,
     )
     log.info("Webhook registered at %s", webhook_url)
 
-    # Background tasks
-    asyncio.create_task(_periodic_evaluation())
-    asyncio.create_task(_periodic_forecast())
-    asyncio.create_task(_self_ping(render_url))
+    bg_tasks = [
+        asyncio.create_task(_periodic_evaluation()),
+        asyncio.create_task(_periodic_forecast()),
+        asyncio.create_task(_self_ping(render_url)),
+    ]
 
-    yield
-
-    log.info("Shutting down")
     try:
-        await bot_app.bot.delete_webhook()
-    except Exception:
-        pass
-    await bot_app.shutdown()
+        yield
+    finally:
+        log.info("Shutting down (webhook preserved)")
+        for task in bg_tasks:
+            task.cancel()
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
+        try:
+            await bot_app.shutdown()
+        except Exception:
+            log.exception("Error during bot shutdown")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -130,7 +132,7 @@ async def _periodic_forecast() -> None:
             await asyncio.sleep(interval)
             if bot_app is not None:
                 await bot_main.periodic_forecast(
-                    type("Ctx", (), {"bot": bot_app.bot})  # minimal context
+                    type("Ctx", (), {"bot": bot_app.bot})
                 )
         except Exception:
             log.exception("Periodic forecast failed")
