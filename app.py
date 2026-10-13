@@ -89,7 +89,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/health")
+@app.get("/")
+async def root() -> dict:
+    return {
+        "service": "v100-analyst-bot",
+        "status": "running",
+        "endpoints": ["/health", "/webhook"],
+        "note": "This is a Telegram bot. Use @v100_analyst_bot to interact.",
+    }
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict:
     return {"status": "ok"}
 
