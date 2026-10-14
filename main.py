@@ -6,7 +6,7 @@ The V100 Telegram bot.
 Run in polling mode (local development):
     python main.py
 
-Run in webhook mode (Render deployment) is handled by app.py.
+Webhook mode (Railway deployment) is handled by app.py.
 """
 
 from __future__ import annotations
@@ -27,6 +27,9 @@ import database
 import indicators
 import market_data
 import predictor
+
+# West Africa Time (UTC+1, no daylight saving).
+WAT = timezone(timedelta(hours=1))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -57,12 +60,12 @@ def _is_authorized(update: Update) -> bool:
     return user is not None and user.id == config.TELEGRAM_ALLOWED_USER_ID
 
 
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
+def _now_wat() -> datetime:
+    return datetime.now(WAT).replace(microsecond=0)
 
 
-def _fmt_utc(dt: datetime) -> str:
-    return dt.strftime("%H:%M UTC")
+def _fmt_wat(dt: datetime) -> str:
+    return dt.strftime("%H:%M WAT")
 
 
 async def _require_authorization(update: Update) -> bool:
@@ -87,8 +90,8 @@ def _build_forecast_text(forecast, last_close: float, prediction_id: int) -> str
     """Build the standard 'Programmed for Analysis' message."""
     stats = database.get_accuracy_stats()
 
-    now_utc = _now_utc()
-    target_utc = now_utc + timedelta(minutes=config.FORECAST_HORIZON_MINUTES)
+    now_wat = _now_wat()
+    target_wat = now_wat + timedelta(minutes=config.FORECAST_HORIZON_MINUTES)
 
     direction_display = forecast.direction.replace(" BIAS", "")
     confidence = _confidence_label(forecast.score)
@@ -114,8 +117,8 @@ def _build_forecast_text(forecast, last_close: float, prediction_id: int) -> str
     return (
         "*Programmed for Analysis.*\n"
         f"*Predict Time:* {config.FORECAST_HORIZON_MINUTES} minutes\n"
-        f"*Time In:*  {_fmt_utc(now_utc)}\n"
-        f"*Time Out:* {_fmt_utc(target_utc)}\n\n"
+        f"*Time In:*  {_fmt_wat(now_wat)}\n"
+        f"*Time Out:* {_fmt_wat(target_wat)}\n\n"
         f"*Direction:* {direction_display}\n"
         "*Signal:* Rule-based (EMA + RSI + Momentum)\n"
         f"*Confidence:* {confidence}  (rule agreement {forecast.score:+d})\n"
@@ -272,7 +275,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Total predictions: `{stats['total_predictions']}`\n"
         f"Evaluated: `{stats['evaluated_predictions']}`\n"
         f"Auto-subscribers: `{len(subscribers)}`\n"
-        f"Check time: `{_fmt_utc(_now_utc())}`"
+        f"Check time: `{_fmt_wat(_now_wat())}`"
     )
     await msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -323,16 +326,27 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     lines = ["*RECENT FORECASTS*", ""]
     for row in rows:
-        created = row["created_at"][:19].replace("T", " ")
+        # created_at is stored in UTC. Convert to WAT for display.
+        try:
+            created_dt = datetime.fromisoformat(row["created_at"])
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            created_wat = created_dt.astimezone(WAT)
+            created = created_wat.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            created = row["created_at"][:19].replace("T", " ")
+
         if row["is_correct"] is None:
             outcome = "pending"
         elif row["is_correct"] == 1:
             outcome = "correct"
         else:
             outcome = "incorrect"
+
         lines.append(
-            f"`#{row['id']}` {created} UTC | *{row['direction']}* | {outcome}"
+            f"`#{row['id']}` {created} WAT | *{row['direction']}* | {outcome}"
         )
+
     await update.message.reply_text(
         "\n".join(lines), parse_mode=ParseMode.MARKDOWN
     )
@@ -380,7 +394,7 @@ async def cmd_evaluate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 else "not counted"
             )
             details.append(f"`#{row['id']}` {outcome}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             details.append(f"`#{row['id']}` FAILED")
 
     await msg.edit_text(
