@@ -64,8 +64,11 @@ def _now_wat() -> datetime:
     return datetime.now(WAT).replace(microsecond=0)
 
 
-def _fmt_wat(dt: datetime) -> str:
-    return dt.strftime("%H:%M WAT")
+def _fmt_both(dt: datetime) -> str:
+    """Show WAT first, then UTC in parentheses."""
+    dt_wat = dt.astimezone(WAT)
+    dt_utc = dt.astimezone(timezone.utc)
+    return f"{dt_wat.strftime('%H:%M')} WAT  ({dt_utc.strftime('%H:%M')} UTC)"
 
 
 async def _require_authorization(update: Update) -> bool:
@@ -117,8 +120,8 @@ def _build_forecast_text(forecast, last_close: float, prediction_id: int) -> str
     return (
         "*Programmed for Analysis.*\n"
         f"*Predict Time:* {config.FORECAST_HORIZON_MINUTES} minutes\n"
-        f"*Time In:*  {_fmt_wat(now_wat)}\n"
-        f"*Time Out:* {_fmt_wat(target_wat)}\n\n"
+        f"*Time In:*  {_fmt_both(now_wat)}\n"
+        f"*Time Out:* {_fmt_both(target_wat)}\n\n"
         f"*Direction:* {direction_display}\n"
         "*Signal:* Rule-based (EMA + RSI + Momentum)\n"
         f"*Confidence:* {confidence}  (rule agreement {forecast.score:+d})\n"
@@ -275,7 +278,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"Total predictions: `{stats['total_predictions']}`\n"
         f"Evaluated: `{stats['evaluated_predictions']}`\n"
         f"Auto-subscribers: `{len(subscribers)}`\n"
-        f"Check time: `{_fmt_wat(_now_wat())}`"
+        f"Check time: `{_fmt_both(_now_wat())}`"
     )
     await msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -326,15 +329,13 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     lines = ["*RECENT FORECASTS*", ""]
     for row in rows:
-        # created_at is stored in UTC. Convert to WAT for display.
         try:
             created_dt = datetime.fromisoformat(row["created_at"])
             if created_dt.tzinfo is None:
                 created_dt = created_dt.replace(tzinfo=timezone.utc)
-            created_wat = created_dt.astimezone(WAT)
-            created = created_wat.strftime("%Y-%m-%d %H:%M")
+            created_display = _fmt_both(created_dt)
         except Exception:
-            created = row["created_at"][:19].replace("T", " ")
+            created_display = row["created_at"][:16].replace("T", " ")
 
         if row["is_correct"] is None:
             outcome = "pending"
@@ -344,7 +345,7 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             outcome = "incorrect"
 
         lines.append(
-            f"`#{row['id']}` {created} WAT | *{row['direction']}* | {outcome}"
+            f"`#{row['id']}` {created_display} | *{row['direction']}* | {outcome}"
         )
 
     await update.message.reply_text(
@@ -361,7 +362,8 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"Symbol: `{config.MARKET_SYMBOL}`\n"
         f"Candle granularity: `{config.CANDLE_GRANULARITY}s`\n"
         f"Forecast horizon: `{config.FORECAST_HORIZON_MINUTES} minutes`\n"
-        f"Minimum move for evaluation: `{config.MIN_MOVE_PCT}%`"
+        f"Minimum move for evaluation: `{config.MIN_MOVE_PCT}%`\n"
+        f"Display timezone: `WAT and UTC side-by-side`"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -487,7 +489,6 @@ def main() -> None:
         application.job_queue.run_repeating(
             periodic_evaluation, interval=60, first=30
         )
-        # Auto-forecast every FORECAST_HORIZON_MINUTES minutes.
         application.job_queue.run_repeating(
             periodic_forecast,
             interval=config.FORECAST_HORIZON_MINUTES * 60,
